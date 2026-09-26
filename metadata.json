@@ -1,0 +1,5 @@
+{
+  "name": "5.0 FootyDay ",
+  "description": "Busca partidos de fútbol de cualquier liga y fecha utilizando la potencia de Gemini con búsqueda en Google en tiempo real. Incluye minijuego de penaltis en la carga.",
+  "requestFramePermissions": []
+}
