@@ -1,8 +1,8 @@
 
 import { Match, Sport } from "../types";
 
-const ODDS_API_KEY = 'ce26d2e3e6fd25a1bcb17bc327a07810';
-const BASE_URL = 'https://api.the-odds-api.com/v4/sports';
+// Vía proxy del servidor: la clave ODDS_API_KEY vive en el backend y nunca sale al navegador.
+const BASE_URL = '/api/proxy/odds';
 
 // Mapeo de ligas comunes de API-Football a The Odds API
 const LEAGUE_MAPPING: Record<number, string> = {
@@ -43,7 +43,7 @@ export const fetchOddsForMatches = async (matches: Match[], sport: Sport): Promi
     // Fetch odds for each league
     await Promise.all(Array.from(leaguesToFetch).map(async (leagueId) => {
       const sportKey = LEAGUE_MAPPING[leagueId];
-      const response = await fetch(`${BASE_URL}/${sportKey}/odds/?apiKey=${ODDS_API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal`);
+      const response = await fetch(`${BASE_URL}/${sportKey}/odds?regions=eu&markets=h2h&oddsFormat=decimal`);
       const data = await response.json();
       
       if (Array.isArray(data)) {

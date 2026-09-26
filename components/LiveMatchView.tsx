@@ -25,7 +25,7 @@ const LiveMatchView: React.FC<LiveMatchViewProps> = ({ match, onClose, lang }) =
       if (!match.id) return;
       setLoading(true);
       try {
-        const fixtureId = parseInt(match.id);
+        const fixtureId = match.id; // se pasa tal cual (puede llevar prefijo espn:/fd:)
         const [eventsData, statsData, lineupsData] = await Promise.all([
           getMatchEvents(fixtureId),
           getMatchStatistics(fixtureId),

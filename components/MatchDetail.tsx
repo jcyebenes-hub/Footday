@@ -72,7 +72,7 @@ const MatchDetail: React.FC<MatchDetailProps> = ({
       }
 
       if (type === 'lineups' && isFootball && match.id) {
-        const fixtureId = Number(match.id);
+        const fixtureId = match.id; // se pasa tal cual (puede llevar prefijo espn:/fd:)
         const [lineups, fixture, injuries] = await Promise.all([
           getMatchLineups(fixtureId),
           getFixtureDetails(fixtureId),
@@ -89,8 +89,8 @@ const MatchDetail: React.FC<MatchDetailProps> = ({
         const h2hString = `${match.homeTeamId}-${match.awayTeamId}`;
         const [direct, homeLast, awayLast] = await Promise.all([
           getH2HMatches(h2hString, 10),
-          getTeamLastMatches(Number(match.homeTeamId), 5),
-          getTeamLastMatches(Number(match.awayTeamId), 5)
+          getTeamLastMatches(match.homeTeamId, 5),
+          getTeamLastMatches(match.awayTeamId, 5)
         ]);
         if (direct || homeLast || awayLast) {
           setH2hData({ 
@@ -505,7 +505,7 @@ const MatchDetail: React.FC<MatchDetailProps> = ({
   const renderH2H = () => {
     if (!h2hData) return null;
 
-    const renderMatchRow = (m: any, highlightTeamId?: number) => {
+    const renderMatchRow = (m: any, highlightTeamId?: number | string) => {
       const isHome = highlightTeamId && m.teams.home.id === highlightTeamId;
       const isAway = highlightTeamId && m.teams.away.id === highlightTeamId;
       const homeScore = m.goals.home;
@@ -580,7 +580,7 @@ const MatchDetail: React.FC<MatchDetailProps> = ({
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3">
-              {h2hData.homeLast.map(m => renderMatchRow(m, Number(match.homeTeamId)))}
+              {h2hData.homeLast.map(m => renderMatchRow(m, match.homeTeamId))}
             </div>
           </div>
 
@@ -594,7 +594,7 @@ const MatchDetail: React.FC<MatchDetailProps> = ({
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3">
-              {h2hData.awayLast.map(m => renderMatchRow(m, Number(match.awayTeamId)))}
+              {h2hData.awayLast.map(m => renderMatchRow(m, match.awayTeamId))}
             </div>
           </div>
         </div>

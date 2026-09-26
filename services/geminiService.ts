@@ -1,7 +1,9 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { MatchResponse, SearchParams, Match, Language, Sport, MatchGroup } from "../types";
-import { getMatchesByDate, getMatchPredictions, getMatchLineups, getMatchEvents } from "../lib/football";
+import { getMatchesByDate, getMatchPredictions, getMatchLineups, getMatchEvents, sortMatches } from "../lib/football";
+import type { FootballApiMatch } from "../lib/football";
+import { getEspnBasketballMatchesByDate } from "../lib/espn";
 import { getSportmonksPredictions } from "../lib/sportmonks";
 import { fetchOddsForMatches } from "./oddsService";
 
@@ -20,10 +22,71 @@ const safeJsonParse = (text: string) => {
 
 const getLanguageName = (lang: Language): string => {
   const names: Record<Language, string> = {
-    es: 'español', en: 'english', ar: 'arabic', fr: 'french', 
+    es: 'español', en: 'english', ar: 'arabic', fr: 'french',
     it: 'italian', de: 'german', pt: 'portuguese', zh: 'mandarin chinese'
   };
   return names[lang];
+};
+
+// Agrupa partidos normalizados por liga, les añade cuotas y devuelve MatchResponse.
+const buildGroupsFromApiMatches = async (
+  apiMatches: FootballApiMatch[],
+  sport: Sport
+): Promise<{ groups: MatchGroup[] }> => {
+  const groupsMap: Record<string, MatchGroup> = {};
+
+  apiMatches.forEach(m => {
+    const key = `${m.league.country}-${m.league.name}`;
+    if (!groupsMap[key]) {
+      groupsMap[key] = {
+        country: m.league.country,
+        league: m.league.name,
+        matches: []
+      };
+    }
+
+    const short = (m.statusShort || '').toUpperCase();
+    const liveShorts = ['LIVE', '1H', 'HT', '2H', 'ET', 'P', 'INT'];
+    const finishedShorts = ['FT', 'AET', 'PEN'];
+    const matchStatus = finishedShorts.includes(short) || m.status.toLowerCase().includes('finish')
+      ? 'finished'
+      : liveShorts.includes(short) ? 'live' : 'scheduled';
+    groupsMap[key].matches.push({
+      id: String(m.id),
+      homeTeam: m.homeTeam.name,
+      awayTeam: m.awayTeam.name,
+      homeTeamId: m.homeTeam.id,
+      awayTeamId: m.awayTeam.id,
+      homeLogo: m.homeTeam.logo,
+      awayLogo: m.awayTeam.logo,
+      date: m.date,
+      time: m.time,
+      status: matchStatus,
+      statusShort: m.statusShort,
+      score: m.score ? `${m.score.home} - ${m.score.away}` : '',
+      briefStatus: m.status,
+      sport,
+      league: m.league.name,
+      leagueId: m.league.id,
+      leagueLogo: m.league.logo,
+      country: m.league.country,
+      provider: m.provider || 'api-football',
+      providerRef: m.providerRef
+    });
+  });
+
+  const finalGroups = await Promise.all(Object.values(groupsMap).map(async (group) => {
+    const matchesWithOdds = await fetchOddsForMatches(group.matches, sport);
+    return { ...group, matches: matchesWithOdds };
+  }));
+
+  return { groups: finalGroups };
+};
+
+const SOURCE_INFO: Record<string, { title: string; uri: string }> = {
+  'api-football': { title: 'API-Football Real-time Data', uri: 'https://www.api-football.com' },
+  'football-data': { title: 'football-data.org', uri: 'https://www.football-data.org' },
+  'espn': { title: 'ESPN Scoreboard', uri: 'https://www.espn.com' },
 };
 
 export const generateBetSlipImage = async (data: {
@@ -173,49 +236,12 @@ export const fetchMatches = async (params: SearchParams): Promise<MatchResponse>
     try {
       const apiMatches = await getMatchesByDate(params.date);
       if (apiMatches && apiMatches.length > 0) {
-        // Agrupar por liga
-        const groupsMap: Record<string, MatchGroup> = {};
-        
-        apiMatches.forEach(m => {
-          const key = `${m.league.country}-${m.league.name}`;
-          if (!groupsMap[key]) {
-            groupsMap[key] = {
-              country: m.league.country,
-              league: m.league.name,
-              matches: []
-            };
-          }
-          
-          groupsMap[key].matches.push({
-            id: String(m.id),
-            homeTeam: m.homeTeam.name,
-            awayTeam: m.awayTeam.name,
-            homeTeamId: m.homeTeam.id,
-            awayTeamId: m.awayTeam.id,
-            homeLogo: m.homeTeam.logo,
-            awayLogo: m.awayTeam.logo,
-            date: m.date,
-            time: m.time,
-            status: m.status.toLowerCase().includes('finish') ? 'finished' : 'scheduled',
-            statusShort: m.statusShort,
-            score: m.score ? `${m.score.home} - ${m.score.away}` : '',
-            briefStatus: m.status,
-            sport: 'football',
-            league: m.league.name,
-            leagueId: m.league.id,
-            leagueLogo: m.league.logo,
-            country: m.league.country
-          });
-        });
-        
-        const finalGroups = await Promise.all(Object.values(groupsMap).map(async (group) => {
-          const matchesWithOdds = await fetchOddsForMatches(group.matches, 'football');
-          return { ...group, matches: matchesWithOdds };
-        }));
-        
-        return { 
-          groups: finalGroups, 
-          sources: [{ web: { title: "API-Football Real-time Data", uri: "https://www.api-football.com" } }] 
+        const { groups } = await buildGroupsFromApiMatches(apiMatches, 'football');
+        const providerUsed = apiMatches[0]?.provider || 'api-football';
+        const src = SOURCE_INFO[providerUsed] || SOURCE_INFO['api-football'];
+        return {
+          groups,
+          sources: [{ web: { title: src.title, uri: src.uri } }]
         };
       }
     } catch (e) {
@@ -267,7 +293,11 @@ export const getMatchInsight = async (match: Match, type: 'analysis' | 'picks' |
   let sportmonksContext = "";
 
   if (match.sport === 'football') {
-    const fixtureId = !isNaN(Number(match.id)) ? Number(match.id) : null;
+    // Ids con prefijo (espn:/fd:) se pasan tal cual para que los eventos ESPN enriquezcan a la IA
+    const hasProviderId = typeof match.id === 'string' && /^(espn|fd):/.test(match.id);
+    const fixtureId: number | string | null = !isNaN(Number(match.id))
+      ? Number(match.id)
+      : (hasProviderId ? match.id : null);
     const matchDate = match.time ? match.time.split(' ')[0] : new Date().toISOString().split('T')[0]; // Fallback a hoy si no hay fecha clara
 
     try {
@@ -488,6 +518,23 @@ Idioma: ${languageName.toUpperCase()}`;
 };
 
 export const fetchBasketballMatchesOnly = async (params: any) => {
+  // 1) Datos reales sin clave vía ESPN (NBA + WNBA) cuando no hay filtro de liga concreto
+  if (!params.query) {
+    try {
+      const espnMatches = await getEspnBasketballMatchesByDate(params.date);
+      if (espnMatches && espnMatches.length > 0) {
+        const sorted = sortMatches(espnMatches);
+        const { groups } = await buildGroupsFromApiMatches(sorted, 'basketball');
+        return {
+          groups,
+          sources: [{ web: { title: SOURCE_INFO['espn'].title, uri: SOURCE_INFO['espn'].uri } }]
+        };
+      }
+    } catch (e) {
+      console.error("Error fetching ESPN basketball, falling back to Gemini:", e);
+    }
+  }
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const leagueQuery = params.query ? `competición "${params.query}"` : 'NBA, Euroliga y ligas principales';
   

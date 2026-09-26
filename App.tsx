@@ -500,6 +500,9 @@ const App: React.FC = () => {
           <p className="text-gray-400 dark:text-[#6E6E6E] text-xs font-bold uppercase tracking-[0.3em]">
             © 2025 PICKMASTER PRO • IA DRIVEN SPORTS INSIGHTS
           </p>
+          <p className="text-gray-300 dark:text-[#3A3A3A] text-[10px] font-bold uppercase tracking-[0.2em] mt-2">
+            Datos: API-Football • football-data.org • ESPN • The Odds API
+          </p>
         </div>
       </footer>
     </div>

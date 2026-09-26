@@ -32,6 +32,8 @@ export interface Match {
   statusShort?: string; // 👈 NUEVO
   score?: string; // e.g., '2 - 1'
   briefStatus?: string; // Texto descriptivo adicional
+  provider?: 'api-football' | 'football-data' | 'espn' | 'gemini';
+  providerRef?: string; // slug ESPN o código football-data de la liga
   odds?: {
     home?: number;
     draw?: number;
