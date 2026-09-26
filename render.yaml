@@ -1,0 +1,20 @@
+# Blueprint para desplegar en Render como Web Service (Node + Express).
+# En Render: New + -> Blueprint -> conecta este repo. Luego rellena las env vars.
+services:
+  - type: web
+    name: footday
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Necesarias en BUILD (Vite las incrusta) y en RUNTIME (proxies):
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FOOTBALL_API_KEY
+        sync: false
+      - key: SPORTMONKS_API_TOKEN
+        sync: false

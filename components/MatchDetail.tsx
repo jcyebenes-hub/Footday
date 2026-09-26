@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Match, User, Language, SavedPick, FavoritesState, FavoriteTeam, Standing } from '../types';
 import { getMatchInsight } from '../services/geminiService';
-import { getStandings, getMatchLineups, getFixtureDetails, getH2HMatches, getTeamLastMatches, getMatchInjuries } from '../api/football';
+import { getStandings, getMatchLineups, getFixtureDetails, getH2HMatches, getTeamLastMatches, getMatchInjuries } from '../lib/football';
 import { translations } from '../utils/translations';
 import LoadingOverlay from './LoadingOverlay';
 import TeamLogo from './TeamLogo';
