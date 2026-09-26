@@ -1,8 +1,8 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { MatchResponse, SearchParams, Match, Language, Sport, MatchGroup } from "../types";
-import { getMatchesByDate, getMatchPredictions, getMatchLineups, getMatchEvents } from "../api/football";
-import { getSportmonksPredictions } from "../api/sportmonks";
+import { getMatchesByDate, getMatchPredictions, getMatchLineups, getMatchEvents } from "../lib/football";
+import { getSportmonksPredictions } from "../lib/sportmonks";
 import { fetchOddsForMatches } from "./oddsService";
 
 /**

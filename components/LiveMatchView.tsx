@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Match, Language } from '../types';
-import { getMatchEvents, getMatchStatistics, getMatchLineups } from '../api/football';
+import { getMatchEvents, getMatchStatistics, getMatchLineups } from '../lib/football';
 import TeamLogo from './TeamLogo';
 import LoadingOverlay from './LoadingOverlay';
 import { translations } from '../utils/translations';

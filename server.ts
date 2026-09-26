@@ -9,24 +9,34 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Render / Railway / Fly asignan el puerto por variable de entorno.
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(cors());
   app.use(express.json());
 
+  // Healthcheck para el hosting
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // API Proxy para Sportmonks
   app.use("/api/proxy/sportmonks", async (req, res) => {
     try {
+      const token = process.env.SPORTMONKS_API_TOKEN;
+      if (!token) {
+        res.status(503).json({ error: "Missing SPORTMONKS_API_TOKEN env var" });
+        return;
+      }
       const endpointAndQuery = req.url.replace(/^\/+/, '');
       const delimiter = endpointAndQuery.includes('?') ? '&' : '?';
-      const token = process.env.SPORTMONKS_API_TOKEN || 'uDdbdN6w0iCtQ6XhZDMTmrvcJmdgvxpWUfBT2OU098Tg1yGsCSz5bo3X1DsS';
       const url = `https://api.sportmonks.com/v3/football/${endpointAndQuery}${delimiter}api_token=${token}`;
-      
-      console.log(`Proxying to Sportmonks: ${url}`);
-      
+
+      console.log(`Proxying to Sportmonks: /${endpointAndQuery.split('?')[0]}`);
+
       const response = await fetch(url);
       const data = await response.json();
-      res.json(data);
+      res.status(response.status).json(data);
     } catch (error) {
       console.error("Sportmonks Proxy Error:", error);
       res.status(500).json({ error: "Failed to fetch from Sportmonks" });
@@ -36,19 +46,23 @@ async function startServer() {
   // API Proxy para API-Football
   app.use("/api/proxy/football", async (req, res) => {
     try {
+      const apiKey = process.env.FOOTBALL_API_KEY;
+      if (!apiKey) {
+        res.status(503).json({ error: "Missing FOOTBALL_API_KEY env var" });
+        return;
+      }
       const endpointAndQuery = req.url.replace(/^\/+/, '');
-      const apiKey = process.env.FOOTBALL_API_KEY || 'cd480b99c8145e3df4ac74ba4b376ce2';
       const url = `https://v3.football.api-sports.io/${endpointAndQuery}`;
-      
-      console.log(`Proxying to API-Football: ${url}`);
-      
+
+      console.log(`Proxying to API-Football: /${endpointAndQuery.split('?')[0]}`);
+
       const response = await fetch(url, {
         headers: {
           "x-apisports-key": apiKey
         }
       });
       const data = await response.json();
-      res.json(data);
+      res.status(response.status).json(data);
     } catch (error) {
       console.error("API-Football Proxy Error:", error);
       res.status(500).json({ error: "Failed to fetch from API-Football" });
@@ -65,7 +79,11 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.use((req, res) => {
+    // 404 JSON para rutas /api desconocidas (antes del fallback SPA)
+    app.use("/api", (_req, res) => {
+      res.status(404).json({ error: "Not found" });
+    });
+    app.use((_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
