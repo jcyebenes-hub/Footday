@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Match, Language } from '../types';
-import { getMatchEvents, getMatchStatistics, getMatchLineups } from '../api/football';
+import { getMatchEvents, getMatchStatistics, getMatchLineups } from '../lib/football';
 import TeamLogo from './TeamLogo';
 import LoadingOverlay from './LoadingOverlay';
 import { translations } from '../utils/translations';
@@ -25,7 +25,7 @@ const LiveMatchView: React.FC<LiveMatchViewProps> = ({ match, onClose, lang }) =
       if (!match.id) return;
       setLoading(true);
       try {
-        const fixtureId = parseInt(match.id);
+        const fixtureId = match.id; // se pasa tal cual (puede llevar prefijo espn:/fd:)
         const [eventsData, statsData, lineupsData] = await Promise.all([
           getMatchEvents(fixtureId),
           getMatchStatistics(fixtureId),

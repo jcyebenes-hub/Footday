@@ -1,17 +1,35 @@
 
+import {
+  getEspnMatchesByDate,
+  getEspnStandings,
+  getEspnEventDetails,
+  getEspnTeamMatches,
+  espnLeagueByApiId,
+  espnLeagueByName,
+} from './espn';
+import {
+  getFootballDataMatchesByDate,
+  getFootballDataStandings,
+  getFootballDataTeamMatches,
+  fdCompetitionByApiId,
+  fdCompetitionByName,
+} from './footballData';
+
 const BASE_URL = '/api/proxy/football';
 
+export type DataProvider = 'api-football' | 'football-data' | 'espn';
+
 export interface FootballApiMatch {
-  id: number;
+  id: number | string;
   date: string;
   time: string;
   homeTeam: {
-    id: number;
+    id: number | string;
     name: string;
     logo: string;
   };
   awayTeam: {
-    id: number;
+    id: number | string;
     name: string;
     logo: string;
   };
@@ -28,6 +46,9 @@ export interface FootballApiMatch {
     home: number;
     away: number;
   };
+  // Origen del dato (cascada: api-football -> football-data -> ESPN sin clave)
+  provider?: DataProvider;
+  providerRef?: string; // slug ESPN o código football-data de la liga
 }
 
 // Prioridad de ligas (1 = máxima importancia, 5 = baja)
@@ -74,15 +95,31 @@ export const sortMatches = (matches: FootballApiMatch[]): FootballApiMatch[] => 
   });
 };
 
-// Obtener partidos por fecha
-export const getMatchesByDate = async (date: string): Promise<FootballApiMatch[]> => {
+// Los ids con prefijo indican el proveedor: `espn:<slug>:<id>`, `fd:<id>`. Sin prefijo = api-football.
+export const parseProviderId = (
+  id: number | string
+): { provider: DataProvider; ref: string; raw: string } => {
+  const s = String(id ?? '');
+  if (s.startsWith('espn:')) {
+    const [, ref, ...rest] = s.split(':');
+    return { provider: 'espn', ref: ref || '', raw: rest.join(':') };
+  }
+  if (s.startsWith('fd:')) {
+    return { provider: 'football-data', ref: '', raw: s.slice(3) };
+  }
+  return { provider: 'api-football', ref: '', raw: s };
+};
+
+// Obtener partidos por fecha (api-football)
+const fetchApiFootballByDate = async (date: string): Promise<FootballApiMatch[]> => {
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures?date=${date}`
     );
-    
+
+    if (!response.ok) return [];
     const data = await response.json();
-    
+
     if (!data.response) return [];
 
     const matches = data.response.map((item: any) => ({
@@ -111,7 +148,8 @@ export const getMatchesByDate = async (date: string): Promise<FootballApiMatch[]
       score: (item.goals && item.goals.home !== null) ? {
         home: item.goals.home,
         away: item.goals.away
-      } : undefined
+      } : undefined,
+      provider: 'api-football' as DataProvider,
     }));
 
     return sortMatches(matches);
@@ -119,6 +157,21 @@ export const getMatchesByDate = async (date: string): Promise<FootballApiMatch[]
     console.error('Error fetching matches:', error);
     return [];
   }
+};
+
+// Obtener partidos por fecha con cascada de proveedores gratuitos:
+// 1) api-football (si hay clave), 2) football-data.org (si hay clave), 3) ESPN (sin clave).
+export const getMatchesByDate = async (date: string): Promise<FootballApiMatch[]> => {
+  const primary = await fetchApiFootballByDate(date);
+  if (primary.length > 0) return primary;
+
+  console.log('API-Football sin datos: probando football-data.org…');
+  const fd = await getFootballDataMatchesByDate(date).catch(() => []);
+  if (fd.length > 0) return sortMatches(fd);
+
+  console.log('football-data sin datos: probando ESPN…');
+  const espn = await getEspnMatchesByDate(date).catch(() => [] as FootballApiMatch[]);
+  return sortMatches(espn);
 };
 
 // Agrupar partidos por liga
@@ -183,8 +236,9 @@ export const getMatchesByLeague = async (leagueId: number, season: number = 2024
   }
 };
 
-// Obtener predicciones para un partido
-export const getMatchPredictions = async (fixtureId: number): Promise<any | null> => {
+// Obtener predicciones para un partido (solo api-football)
+export const getMatchPredictions = async (fixtureId: number | string): Promise<any | null> => {
+  if (parseProviderId(fixtureId).provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/predictions?fixture=${fixtureId}`
@@ -220,8 +274,9 @@ export const getMatchPredictions = async (fixtureId: number): Promise<any | null
   }
 };
 
-// Obtener enfrentamientos directos (H2H)
+// Obtener enfrentamientos directos (H2H) (solo api-football)
 export const getH2HMatches = async (h2h: string, limit: number = 10): Promise<any[] | null> => {
+  if (h2h.includes('espn:') || h2h.includes('fd:')) return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures/headtohead?h2h=${h2h}&last=${limit}`
@@ -234,8 +289,16 @@ export const getH2HMatches = async (h2h: string, limit: number = 10): Promise<an
   }
 };
 
-// Obtener últimos partidos de un equipo
-export const getTeamLastMatches = async (teamId: number, limit: number = 5): Promise<any[] | null> => {
+// Obtener últimos partidos de un equipo (todos los proveedores)
+export const getTeamLastMatches = async (teamId: number | string, limit: number = 5): Promise<any[] | null> => {
+  const parsed = parseProviderId(teamId);
+  if (parsed.provider === 'espn' && parsed.ref && parsed.raw) {
+    return getEspnTeamMatches(parsed.ref, parsed.raw, limit);
+  }
+  if (parsed.provider === 'football-data' && parsed.raw) {
+    return getFootballDataTeamMatches(parsed.raw, limit);
+  }
+  if (parsed.provider !== 'api-football' || parsed.raw === 'NaN' || parsed.raw === '') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures?team=${teamId}&last=${limit}`
@@ -248,8 +311,9 @@ export const getTeamLastMatches = async (teamId: number, limit: number = 5): Pro
   }
 };
 
-// Obtener lesiones y bajas de un partido
-export const getMatchInjuries = async (fixtureId: number): Promise<any[] | null> => {
+// Obtener lesiones y bajas de un partido (solo api-football)
+export const getMatchInjuries = async (fixtureId: number | string): Promise<any[] | null> => {
+  if (parseProviderId(fixtureId).provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures/injuries?fixture=${fixtureId}`
@@ -262,8 +326,9 @@ export const getMatchInjuries = async (fixtureId: number): Promise<any[] | null>
   }
 };
 
-// Obtener detalles de un fixture (incluye árbitro)
-export const getFixtureDetails = async (fixtureId: number): Promise<any | null> => {
+// Obtener detalles de un fixture (incluye árbitro) (solo api-football)
+export const getFixtureDetails = async (fixtureId: number | string): Promise<any | null> => {
+  if (parseProviderId(fixtureId).provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures?id=${fixtureId}`
@@ -276,8 +341,9 @@ export const getFixtureDetails = async (fixtureId: number): Promise<any | null> 
   }
 };
 
-// Obtener alineaciones de un partido
-export const getMatchLineups = async (fixtureId: number): Promise<any[] | null> => {
+// Obtener alineaciones de un partido (solo api-football; ninguna API gratuita las ofrece)
+export const getMatchLineups = async (fixtureId: number | string): Promise<any[] | null> => {
+  if (parseProviderId(fixtureId).provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures/lineups?fixture=${fixtureId}`
@@ -290,8 +356,14 @@ export const getMatchLineups = async (fixtureId: number): Promise<any[] | null> 
   }
 };
 
-// Obtener eventos (goles, tarjetas, cambios) de un partido
-export const getMatchEvents = async (fixtureId: number): Promise<any[] | null> => {
+// Obtener eventos (goles, tarjetas, cambios) de un partido (api-football + ESPN)
+export const getMatchEvents = async (fixtureId: number | string): Promise<any[] | null> => {
+  const parsedEv = parseProviderId(fixtureId);
+  if (parsedEv.provider === 'espn' && parsedEv.ref && parsedEv.raw) {
+    const detailsEv = await getEspnEventDetails(parsedEv.ref, parsedEv.raw).catch(() => null);
+    return detailsEv?.events?.length ? detailsEv.events : null;
+  }
+  if (parsedEv.provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures/events?fixture=${fixtureId}`
@@ -304,8 +376,14 @@ export const getMatchEvents = async (fixtureId: number): Promise<any[] | null> =
   }
 };
 
-// Obtener estadísticas de un partido
-export const getMatchStatistics = async (fixtureId: number): Promise<any[] | null> => {
+// Obtener estadísticas de un partido (api-football + ESPN)
+export const getMatchStatistics = async (fixtureId: number | string): Promise<any[] | null> => {
+  const parsedSt = parseProviderId(fixtureId);
+  if (parsedSt.provider === 'espn' && parsedSt.ref && parsedSt.raw) {
+    const detailsSt = await getEspnEventDetails(parsedSt.ref, parsedSt.raw).catch(() => null);
+    return detailsSt?.stats?.length ? detailsSt.stats : null;
+  }
+  if (parsedSt.provider !== 'api-football') return null;
   try {
     const response = await fetch(
       `${BASE_URL}/fixtures/statistics?fixture=${fixtureId}`
@@ -348,11 +426,15 @@ export const getLeagueIdByName = async (name: string, country?: string): Promise
   }
 };
 
-// Obtener clasificación de una liga
-export const getStandings = async (leagueId: number | string, date?: string, season?: number): Promise<any | null> => {
+// Intento de clasificación solo con api-football (devuelve null si no hay datos)
+const fetchApiFootballStandings = async (
+  leagueId: number | string,
+  date?: string,
+  season?: number
+): Promise<any | null> => {
   try {
     let id: number;
-    
+
     // Si es un número o un string que representa un número, lo usamos como ID directamente
     if (!isNaN(Number(leagueId))) {
       id = Number(leagueId);
@@ -377,17 +459,18 @@ export const getStandings = async (leagueId: number | string, date?: string, sea
     const response = await fetch(
       `${BASE_URL}/standings?league=${id}&season=${targetSeason}`
     );
-    
+
+    if (!response.ok) return null;
     const data = await response.json();
-    
+
     // Si no hay respuesta para la temporada calculada, intentar con la anterior o la siguiente como fallback
     if ((!data.response || data.response.length === 0) && !season) {
       // Intentar con la temporada anterior
-      const prevSeasonData = await getStandings(id, undefined, targetSeason - 1);
+      const prevSeasonData = await fetchApiFootballStandings(id, undefined, targetSeason - 1);
       if (prevSeasonData) return prevSeasonData;
-      
+
       // Intentar con la temporada actual del año
-      const currentYearSeason = await getStandings(id, undefined, new Date().getFullYear());
+      const currentYearSeason = await fetchApiFootballStandings(id, undefined, new Date().getFullYear());
       if (currentYearSeason) return currentYearSeason;
     }
 
@@ -398,6 +481,34 @@ export const getStandings = async (leagueId: number | string, date?: string, sea
     console.error('Error fetching standings:', error);
     return null;
   }
+};
+
+// Obtener clasificación de una liga con cascada: api-football -> football-data -> ESPN.
+export const getStandings = async (leagueId: number | string, date?: string, season?: number): Promise<any | null> => {
+  const primary = await fetchApiFootballStandings(leagueId, date, season);
+  if (primary) return primary;
+
+  const isNumeric = !isNaN(Number(leagueId));
+
+  // football-data.org (gratis, 12 competiciones top)
+  const fdComp = isNumeric
+    ? fdCompetitionByApiId(Number(leagueId))
+    : fdCompetitionByName(String(leagueId));
+  if (fdComp) {
+    const fd = await getFootballDataStandings(fdComp.code).catch(() => null);
+    if (fd) return fd;
+  }
+
+  // ESPN (sin clave)
+  const espnLeague = isNumeric
+    ? espnLeagueByApiId(Number(leagueId))
+    : espnLeagueByName(String(leagueId));
+  if (espnLeague) {
+    const espn = await getEspnStandings(espnLeague.slug).catch(() => null);
+    if (espn) return espn;
+  }
+
+  return null;
 };
 
 // IDs de las ligas principales
